@@ -1,0 +1,212 @@
+---
+title: "Milestone Report Week 2 Capstone Coursera"
+author: "Maximiliano Fernández"
+date: "2020"
+output:
+  html_document: default
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Coursera week 2 Data Specialization Capstone
+
+## Exploratory analysis and word model prediction
+
+This is the final project in the Cuorsera data specialization from Johns Hopkin University (https://www.coursera.org/learn/data-science-project). The object of the week 2 is to perform exploratory analysis from real data from twitter, blogs and news from the internet, and then think about how to create a text model prediction in order to predict what will be the next word from a user interface input.
+The report will be separated into two task. 
+
++ First: perform a thoroughly analysis from the real data and find the most common unigrams, bigrams and trigrams. 
+
++ Second: based on the information obtained from task one, a text prediction model will be thinked in order to establish the base to the next week object
+
+
+The data set comes from the company SwiftKey which works with Coursera in this capstone project. The original data can be downloaded from https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip  
+
+
+## Task 1. Exploratory analysis
+
+The first step is to download the data from the provided link and load the necessary libraries for the next steps. The data comes from three different data sets, one from twitter, another from blogs and the final one from news.
+
+```{r data_download}
+suppressPackageStartupMessages({
+library(tm)
+library(data.table)
+library(tidyr)
+library(dplyr)
+library(tidytext)
+library(stringi)
+library(ggplot2)
+})
+
+#Read and store data. 
+twitter_us <- "en_US.twitter.txt"
+blogs_us <- "en_US.blogs.txt"
+news_us <- "en_US.news.txt"
+
+leo_twitter_raw <-readLines(twitter_us,skipNul = TRUE) #Defalut encoding is UTF-8
+leo_blog_raw <-readLines(blogs_us,skipNul = TRUE)
+leo_news_raw <-readLines(news_us,skipNul = TRUE, warn = FALSE)
+```
+The next step into the exploratory analysis is finding how much information has each data set and how is composed, for example, number of lines, file size, number of words per file and maximum number of character per lines. 
+
+```{r data_exploration}
+#Count lines in each text
+nlines_twitter <- length(leo_twitter_raw)
+nlines_blog <- length(leo_blog_raw)
+nlines_news <- length(leo_news_raw)
+
+#File size
+size_blogs_file <- file.size("en_US.blogs.txt")/ 1024^2 #convert to MB
+size_news_file <- file.size("en_US.news.txt")/ 1024^2
+size_twitter_file <- file.size("en_US.twitter.txt")/ 1024^2
+
+#Number of words in each file
+leo_twitter_wordcount <- sum(stri_count_words(leo_twitter_raw))
+leo_blog_wordcount <- sum(stri_count_words(leo_blog_raw))
+leo_news_wordcount <- sum(stri_count_words(leo_news_raw))
+
+#Max lenght in a line
+max_char_twitter <- max(nchar(leo_twitter_raw))
+max_char_blog <- max(nchar(leo_blog_raw))
+max_char_news <- max(nchar(leo_news_raw))
+```
+
+### Summary of the three data sets
+The previous code is summarized into a data frame (code not shown here). This data shows that the three original files consume more than 150 Mb each. The Twitter file contains more lines than the others and has more words and the longest character count per line.
+
+```{r data_summary, eval= TRUE, echo = FALSE}
+data.frame("Data" = c("twitter", "blogs", "news"),
+           "File.size.Mb" = c(size_blogs_file,size_news_file, size_twitter_file),
+           "Line.Count" = c(nlines_twitter,nlines_blog,nlines_news),
+           "Word count" = c(leo_blog_wordcount, leo_news_wordcount, leo_twitter_wordcount),
+           "Max char.line"=c(max_char_blog,max_char_news,max_char_twitter))
+```
+The following plots shows the frequency of words per line in each data set
+
+```{r exploratory_plots, eval= TRUE, echo = FALSE}
+#plots
+summary_plot <- lapply(list(leo_twitter_raw, leo_blog_raw, leo_news_raw), function(x) stri_count_words(x))
+qplot(summary_plot[[1]],geom = "histogram",binwidth = 1, main = "Twitter",
+               xlab = "Words per line", ylab = "Frequency")
+qplot(summary_plot[[2]],geom = "histogram", binwidth = 5, main = "Blog",
+                           xlab = "Words per line", ylab = "Frequency")
+qplot(summary_plot[[3]],geom = "histogram",binwidth = 5, main = "News",
+                        xlab = "Words per line", ylab = "Frequency")
+```
+
+Because the data sets have considerable size in Mb and that the speech text mining is a big power consuming process a sample is taken from the original data set containing the information from blogs, news and twitter. With a sample of 10% I consider that a useful model can be achieve. However, as the model will be constructed in the following week, I will construct the first model and obvserve if with the 10% sample from the original data it can perform well
+Before uniting the three datasets, all non-latin characters are eliminated
+
+```{r sample_and_cleaning, eval= TRUE}
+leo_twitter_raw2 <- iconv(leo_twitter_raw, "latin1", "ASCII", sub="")
+leo_blog_raw2 <- iconv(leo_blog_raw, "latin1", "ASCII", sub="")
+leo_news_raw2 <- iconv(leo_news_raw, "latin1", "ASCII", sub="")
+
+set.seed(54321) #for reproducibility
+leo_twitter_sample<- sample(leo_twitter_raw2,length(leo_twitter_raw)*0.1)
+leo_blog_sample<- sample(leo_blog_raw2,length(leo_blog_raw2)*0.1)
+leo_news_sample<- sample(leo_news_raw2,length(leo_news_raw2)*0.1)
+
+rm(leo_twitter_raw2, leo_blog_raw2, leo_news_raw2,leo_twitter_raw, 
+   leo_blog_raw,leo_news_raw, summary_plot) #Clean working space from unnecesary data
+```
+
+The next step is cleaning the data and tokenization. 
+Tokenization is the process of spliting the strings into their component words. For example, the string "The house is white" will be divided into "the", "house", "is", "white", each word will be one line of a data frame. To make the tokenization I will be using "tidytext" (https://www.tidytextmining.com/) which works well with other common packages as ggplot, tibble, dyplyr and more.
+
+Because the object of the project is to create a prediction model for text input, some words, phrases and numbers will not be necessary or will not be taken into account in this model. In the following steps the next things are removed: numbers, URL, punctuation and white spaces.
+
+After this, comes the tokenization, in this step more data is removed or changed from the data set.
+
+
+To start, lets create a corpus data set, which is the sum of the three different data sets (twitter, blogs and news). More information about corpus data in https://en.wikipedia.org/wiki/Text_corpus
+To create the corpus, the sum af the three data sets is converted into a Vcorpus data (more information of what a Vcorpus is in: https://stats.stackexchange.com/questions/164372/what-is-vectorsource-and-vcorpus-in-tm-text-mining-package-in-r)
+
+```{r corpus, eval= TRUE}
+sample_data <- c(leo_twitter_sample, leo_blog_sample,leo_news_sample)
+writeLines(sample_data, "./final_data/sample.txt") #Save sampled data
+corpus <- VCorpus(VectorSource(sample_data))
+
+rm(sample_data) #remove sample_data as it is now stored in "corpus"
+#Remove punctuation by replacing it with " "
+corpus <- tm_map(corpus, removePunctuation)
+#Transform to lower case
+corpus <- tm_map(corpus, content_transformer(tolower))
+#Remove numbers
+corpus <- tm_map(corpus, removeNumbers)
+## Remove URLs
+remove_web_url <- function(x) gsub("http[[:alnum:]]*", "", x)
+corpus <- tm_map(corpus, content_transformer(remove_web_url))
+#Strip extra whitespace from a text document. Multiple whitespace characters are collapsed to a single blank.
+corpus <- tm_map(corpus, stripWhitespace)
+```
+
+Now starts the tokenization process which, as explained before, is the process of splitting the text strings into each individual word. To do it, the function *unnest_token()* function from the tidytext package is used. By default, this function converts the tokens to lowercase, which makes them easier to compare or combine with other datasets. However, this was done before in the corpus.
+One important thing is that the function works only with a tibble data set, so the corpus need to be converted to this type of data frame.
+Common stop words, as "the", "to", "of" will be removed from the data as they do not add useful information to the model. However, a more advance model could use these words, but it is not the object of this one because it need to be efficiently in the use of memory. The function *anti_join()* and the data (stop_words) is used to remove these words.
+
+```{r corpus_tokenization, eval= TRUE}
+tidy_corpus <-  corpus %>% tidy() #%>% select(id,text)
+tidy_corpus <- tidy_corpus %>% select(id,text)
+rm(corpus)
+tidy_corpus <- tidy_corpus %>% unnest_tokens(word,text)
+
+#Dataset of naughty words that need to be erased from the set (definition from Coursera capstone)
+naughty_words <- tibble(word = readLines('https://raw.githubusercontent.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words/master/en'))
+#Remove stop words and then also naughty words
+data(stop_words)
+tidy_corpus <- tidy_corpus %>% anti_join(stop_words,by= "word")
+```
+
+Now, create a wordcloud with the top 50 words by frequency. For this, the library "wordcloud" is used.
+
+```{r word_cloud, eval= TRUE, echo = FALSE}
+suppressPackageStartupMessages(library(wordcloud))
+tidy_corpus %>% count(word) %>%  with(wordcloud(word, n, max.words = 50,random.order = F, rot.per=0.35, colors=brewer.pal(8, "Dark2")))
+```
+
+After cleaning and tokenizing the data set commes the step of generating unigrams, bigrams, trigrams and quadgrams. These will then be used (not in this week project) to create prediction model
+
+```{r n_grams, eval= TRUE, echo = TRUE}
+tidy_unigram <- tidy_corpus %>% count(word, sort = TRUE)
+#Create bi-gram
+tidy_bigram <- tidy_corpus %>% unnest_tokens(bigram, word, token = "ngrams", n = 2) %>% drop_na()
+#Create trigram
+tidy_trigram <- tidy_corpus %>% unnest_tokens(trigram, word, token = "ngrams", n = 3) %>% drop_na()
+#Create quadgram
+tidy_quadgram <- tidy_corpus %>% unnest_tokens(quadgram, word, token = "ngrams", n = 4) %>% drop_na()
+```
+
+```{r n_grams_plot, eval= TRUE, echo = FALSE}
+#plot topwords of unigrams
+tidy_corpus %>% count(word, sort = TRUE) %>% head(12) %>% mutate(word = reorder(word,n)) %>%
+  ggplot(aes(word,n)) + geom_col() + xlab(NULL) + ylab("Word count") +  coord_flip() + theme_bw() +
+  ggtitle("Most common uni-grams")
+#PLot most commmon bi-grams
+tidy_bigram %>% count(bigram, sort = TRUE) %>% head(12) %>% mutate(bigram = reorder(bigram,n)) %>%
+   ggplot(aes(bigram,n)) + geom_col() + xlab(NULL)+ ylab("Frequency count") +  coord_flip() + theme_bw() + ggtitle("Most common bi-grams")
+#PLot most commmon tri-grams
+tidy_trigram %>% count(trigram, sort = TRUE) %>% head(12) %>% mutate(trigram = reorder(trigram,n)) %>%
+  ggplot(aes(trigram,n)) + geom_col() + xlab(NULL) + ylab("Frequency count") +  coord_flip() + theme_bw() + ggtitle("Most common tri-grams")
+```
+
+
+
+Future work
+
+Possible improvements: 
++ Using synonyms in order to predict words that are not in the base model but are synonyms
++ Deal with punctuation and misspelled words 
+
+
+
+
+
+
+
+
