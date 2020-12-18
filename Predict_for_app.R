@@ -54,8 +54,3 @@ predicted_words <- function(entrada){
   
 
 
-
-Tomar de aca 
-https://github.com/eileen98034/Capstone/blob/master/Final/ShinyApplication/predict.R
-https://github.com/mark-blackmore/JHU-Data-Science-Capstone/blob/master/05_Task_Script.md 
-https://github.com/MarcoLeti/DataScience-SwiftKeyCapstoneProject/blob/master/ShinyApp/functions/predictionModel.R 
